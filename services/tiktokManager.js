@@ -1,4 +1,4 @@
-const { TikTokLiveConnection } = require('tiktok-live-connector');
+const { WebcastPushConnection } = require('tiktok-live-connector');
 
 class TikTokSessionManager {
   constructor(io) {
@@ -12,7 +12,7 @@ class TikTokSessionManager {
 
     console.log(`🔗 Intentando conectar con TikTok para el canal: @${username} (Token: ${token})`);
 
-    const tiktokLiveConnection = new TikTokLiveConnection(username, {});
+    const tiktokLiveConnection = new WebcastPushConnection(username);
     let intentosReconexion = 0;
     const maxIntentos = 5;
 
