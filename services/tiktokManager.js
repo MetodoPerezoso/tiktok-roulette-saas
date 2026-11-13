@@ -3,119 +3,79 @@ const { WebcastPushConnection } = require('tiktok-live-connector');
 class TikTokSessionManager {
   constructor(io) {
     this.io = io;
-    // Mapa de sesiones activas: key = streamerToken, value = { connection, username, cleanupTimer }
-    this.sessions = new Map();
+    this.connections = new Map();
   }
 
-  async connectStreamer(token, tiktokUsername, config) {
-    const cleanUser = tiktokUsername.replace('@', '').trim().toLowerCase();
+  async connectStreamer(token, username) {
+    // Si ya hay una conexión activa para este token, la desconectamos primero
+    this.disconnectStreamer(token);
 
-    // Si ya existe una conexión activa para este token y mismo usuario, reutilizarla
-    if (this.sessions.has(token)) {
-      const existing = this.sessions.get(token);
-      if (existing.username === cleanUser && existing.isConnected) {
-        if (existing.cleanupTimer) clearTimeout(existing.cleanupTimer);
-        return { status: 'already_connected', username: cleanUser };
-      }
-      this.disconnectStreamer(token);
-    }
-
-    const tiktokConnection = new WebcastPushConnection(cleanUser, {
-      processInitialData: false,
-      enableExtendedGiftInfo: true,
-      requestPollingIntervalMs: 2000
-    });
-
-    const sessionData = {
-      connection: tiktokConnection,
-      username: cleanUser,
-      isConnected: false,
-      cleanupTimer: null
-    };
-
-    this.sessions.set(token, sessionData);
+    const tiktokTvConnection = new WebcastPushConnection(username);
 
     try {
-      const state = await tiktokConnection.connect();
-      sessionData.isConnected = true;
+      // Intentar conectar con TikTok
+      const state = await tiktokTvConnection.connect();
+      console.log(`✅ Conectado exitosamente a la sala de: @${username} (Room ID: ${state.roomId})`);
       
-      // Notificar al dashboard y al overlay que está en vivo
-      this.io.to(token).emit('tiktok:status', { 
-        connected: true, 
-        roomId: state.roomId, 
-        username: cleanUser 
-      });
+      this.connections.set(token, tiktokTvConnection);
 
-      // ESCUCHAR REGALOS EN TIEMPO REAL
-      tiktokConnection.on('gift', (data) => {
-        // En TikTok, los regalos con racha (streakable) envían eventos repetidos.
-        // Solo disparamos cuando la racha termina (repeatEnd === true) o no es racha.
+      // Notificar al dashboard que se conectó con éxito
+      this.io.to(token).emit('tiktok:status', { connected: true, username });
+
+      // Escuchar eventos de regalos en tiempo real
+      tiktokTvConnection.on('gift', (data) => {
+        // Filtrar solo regalos que se estén enviando (evitar duplicados por streaks en curso si es necesario)
         if (data.giftType === 1 && !data.repeatEnd) {
           return; 
         }
 
-        const totalDiamonds = (data.diamondCount || 1) * (data.repeatCount || 1);
-
         const giftPayload = {
-          id: `${data.msgId}_${Date.now()}`,
-          user: data.nickname || data.uniqueId,
+          id: data.giftId || ('gift_' + Date.now()),
+          user: data.uniqueId || data.nickname || 'Anónimo',
           uniqueId: data.uniqueId,
-          avatar: data.profilePictureUrl,
-          giftName: data.giftName,
-          giftId: data.giftId,
-          coins: totalDiamonds,
+          avatar: data.profilePictureUrl || '',
+          giftName: data.giftName || 'Regalo',
+          coins: (data.diamondCount || 1) * (data.repeatCount || 1),
           repeatCount: data.repeatCount || 1
         };
 
-        // Enviar el regalo únicamente a la sala (room) de este cliente
+        // Enviar el evento de regalo al overlay del streamer
         this.io.to(token).emit('tiktok:gift', giftPayload);
       });
 
-      // Manejo de desconexión o fin del vivo
-      tiktokConnection.on('streamEnd', () => {
-        this.io.to(token).emit('tiktok:status', { connected: false, reason: 'El directo ha finalizado' });
+      tiktokTvConnection.on('disconnected', () => {
+        console.log(`❌ Desconectado de @${username}`);
         this.disconnectStreamer(token);
+        this.io.to(token).emit('tiktok:status', { connected: false, reason: 'Transmisión finalizada o caída' });
       });
-
-      tiktokConnection.on('disconnected', () => {
-        sessionData.isConnected = false;
-        this.io.to(token).emit('tiktok:status', { connected: false, reason: 'Desconectado de TikTok' });
-      });
-
-      return { status: 'connected', username: cleanUser };
 
     } catch (err) {
-      this.sessions.delete(token);
+      console.error(`❌ Error al conectar con @${username}:`, err.message);
+      this.io.to(token).emit('tiktok:status', { connected: false });
+      // Enviar el error específico al cliente para depuración
       this.io.to(token).emit('tiktok:error', { 
-        message: 'No se pudo conectar. Verificá que el usuario esté EN VIVO ahora mismo.' 
+        message: `No se pudo conectar con @${username}. Asegúrate de que el usuario esté en vivo y el nombre sea exacto.` 
       });
-      throw err;
     }
   }
 
   disconnectStreamer(token) {
-    if (!this.sessions.has(token)) return;
-    const session = this.sessions.get(token);
-    if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
-    try {
-      session.connection.disconnect();
-    } catch (e) {}
-    this.sessions.delete(token);
+    if (this.connections.has(token)) {
+      const connection = this.connections.get(token);
+      try {
+        connection.disconnect();
+      } catch (e) {}
+      this.connections.delete(token);
+    }
   }
 
-  // Programa desconexión si el streamer cierra todas sus pestañas/OBS
-  scheduleCleanup(token, delayMs = 60000) {
-    const session = this.sessions.get(token);
-    if (!session) return;
-    if (session.cleanupTimer) clearTimeout(session.cleanupTimer);
-    
-    session.cleanupTimer = setTimeout(() => {
+  scheduleCleanup(token, delay) {
+    setTimeout(() => {
       const room = this.io.sockets.adapter.rooms.get(token);
       if (!room || room.size === 0) {
-        console.log(`[Auto-Cleanup] Cerrando sesión inactiva: ${session.username}`);
         this.disconnectStreamer(token);
       }
-    }, delayMs);
+    }, delay);
   }
 }
 
