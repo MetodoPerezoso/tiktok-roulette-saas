@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Panel SaaS - Ruleta Interactiva TikTok</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen p-6">
+  <div class="max-w-4xl mx-auto space-y-6">
+    <!-- Header -->
+    <div class="flex justify-between items-center bg-slate-900 p-6 rounded-2xl border border-slate-800">
+      <div>
+        <h1 class="text-2xl font-bold text-pink-500">Ruleta Interactiva TikTok SaaS</h1>
+        <p class="text-sm text-slate-400">Panel de Control de Streamer</p>
+      </div>
+      <div id="status-badge" class="px-4 py-2 rounded-full text-sm font-semibold bg-red-950 text-red-400 border border-red-800">
+        🔴 Desconectado de TikTok
+      </div>
+    </div>
+
+    <!-- Conexión de TikTok -->
+    <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-2">Usuario de TikTok (sin @)</label>
+        <div class="flex gap-2">
+          <input type="text" id="tiktok-user" placeholder="ej. tu_usuario" class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-white focus:outline-none focus:border-pink-500">
+          <button id="btn-connect" class="bg-pink-600 hover:bg-pink-500 font-semibold px-6 py-2 rounded-xl transition">Conectar</button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-slate-300 mb-2">Link para OBS (Fuente de Navegador)</label>
+        <div class="flex gap-2">
+          <input type="text" id="obs-link" readonly class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2 text-slate-400 text-sm">
+          <button onclick="navigator.clipboard.writeText(document.getElementById('obs-link').value)" class="bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-xl text-sm transition">Copiar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Simulador de Regalos (Para testear sin estar en vivo) -->
+    <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex justify-between items-center">
+      <div>
+        <h3 class="font-bold text-lg">Simulador de Prueba</h3>
+        <p class="text-xs text-slate-400">Dispará un regalo simulado para verificar que la ruleta gire en el OBS.</p>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="testGift('Rosa', 1)" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm">Rosa (N1)</button>
+        <button onclick="testGift('Perfume', 50)" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm">Perfume (N2)</button>
+        <button onclick="testGift('León', 1000)" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm">León (N3)</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Generar un token único por navegador/cliente si no existe
+    let token = localStorage.getItem('streamer_token');
+    if (!token) {
+      token = 'st_' + Math.random().toString(36).substring(2, 15);
+      localStorage.setItem('streamer_token', token);
+    }
+
+    // Mostrar link de OBS
+    const obsUrl = `${window.location.origin}/overlay/${token}`;
+    document.getElementById('obs-link').value = obsUrl;
+
+    // Conexión Socket.io
+    const socket = io({
+      query: { token, role: 'dashboard' }
+    });
+
+    const statusBadge = document.getElementById('status-badge');
+    const btnConnect = document.getElementById('btn-connect');
+    const inputUser = document.getElementById('tiktok-user');
+
+    btnConnect.addEventListener('click', () => {
+      const username = inputUser.value.trim();
+      if (!username) return alert('Ingresá un usuario de TikTok');
+      btnConnect.textContent = 'Conectando...';
+      socket.emit('client:connect_tiktok', { username });
+    });
+
+    socket.on('tiktok:status', (data) => {
+      if (data.connected) {
+        statusBadge.className = 'px-4 py-2 rounded-full text-sm font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800';
+        statusBadge.textContent = `🟢 Conectado a @${data.username}`;
+        btnConnect.textContent = 'Desconectar';
+      } else {
+        statusBadge.className = 'px-4 py-2 rounded-full text-sm font-semibold bg-red-950 text-red-400 border border-red-800';
+        statusBadge.textContent = `🔴 Desconectado (${data.reason || ''})`;
+        btnConnect.textContent = 'Conectar';
+      }
+    });
+
+    socket.on('tiktok:error', (err) => {
+      alert(err.message);
+      btnConnect.textContent = 'Conectar';
+    });
+
+    function testGift(giftName, coins) {
+      socket.emit('client:test_gift', {
+        id: 'test_' + Date.now(),
+        user: 'EspectadorTest',
+        uniqueId: 'test_user',
+        avatar: 'https://p16-sign-va.tiktokcdn.com/tos-maliva-avt-0068/7317765181702434821~c5_100x100.jpeg',
+        giftName: giftName,
+        coins: coins,
+        repeatCount: 1
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Overlay Ruleta OBS</title>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body {
+      margin: 0;
+      background: transparent;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+    #container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+    canvas {
+      filter: drop-shadow(0 10px 25px rgba(0,0,0,0.5));
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <canvas id="rouletteCanvas" width="500" height="500"></canvas>
+  </div>
+
+  <script>
+    // Extraer el token de la URL (/overlay/:token)
+    const pathSegments = window.location.pathname.split('/');
+    const token = pathSegments[pathSegments.length - 1];
+
+    const socket = io({
+      query: { token, role: 'overlay' }
+    });
+
+    const canvas = document.getElementById('rouletteCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Configuración base de la ruleta
+    let currentAngle = 0;
+    let isSpinning = false;
+    let queue = [];
+
+    // Opciones por defecto (luego se cargarán de la base de datos o config del usuario)
+    const sectors = [
+      { label: "Premio 1", color: "#FF3366" },
+      { label: "Premio 2", color: "#33CCFF" },
+      { label: "Premio 3", color: "#FFCC00" },
+      { label: "Premio 4", color: "#33FF66" }
+    ];
+
+    function drawWheel() {
+      const numSectors = sectors.length;
+      const arc = (2 * Math.PI) / numSectors;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.save();
+      ctx.translate(250, 250);
+      ctx.rotate(currentAngle);
+
+      sectors.forEach((sector, i) => {
+        const angle = i * arc;
+        ctx.beginPath();
+        ctx.fillStyle = sector.color;
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, 220, angle, angle + arc);
+        ctx.lineTo(0, 0);
+        ctx.fill();
+        ctx.stroke();
+
+        // Texto
+        ctx.save();
+        ctx.rotate(angle + arc / 2);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 16px sans-serif";
+        ctx.fillText(sector.label, 120, 10);
+        ctx.restore();
+      });
+
+      ctx.restore();
+
+      // Puntero superior
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.moveTo(250, 10);
+      ctx.lineTo(240, 35);
+      ctx.serialize;
+      ctx.lineTo(260, 35);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    function spinWheel(targetIndex, callback) {
+      if (isSpinning) return;
+      isSpinning = true;
+
+      const numSectors = sectors.length;
+      const arc = (2 * Math.PI) / numSectors;
+      const targetAngle = 10 * 2 * Math.PI + (numSectors - targetIndex) * arc - arc / 2;
+
+      let start = null;
+      const duration = 4000; // 4 segundos de giro
+
+      function animate(timestamp) {
+        if (!start) start = timestamp;
+        const progress = (timestamp - start) / duration;
+        
+        if (progress < 1) {
+          // Easing cúbico para frenado suave
+          const easeOut = 1 - Math.pow(1 - progress, 3);
+          currentAngle = targetAngle * easeOut;
+          drawWheel();
+          requestAnimationFrame(animate);
+        } else {
+          currentAngle = targetAngle % (2 * Math.PI);
+          isSpinning = false;
+          drawWheel();
+          if (callback) callback();
+        }
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    // Escuchar regalos del servidor
+    socket.on('tiktok:gift', (gift) => {
+      queue.push(gift);
+      processQueue();
+    });
+
+    function processQueue() {
+      if (isSpinning || queue.length === 0) return;
+      const gift = queue.shift();
+      
+      // Elegir índice aleatorio o según nivel
+      const randomIndex = Math.floor(Math.random() * sectors.length);
+      
+      spinWheel(randomIndex, () => {
+        setTimeout(processQueue, 1500); // Pausa de 1.5s entre giros
+      });
+    }
+
+    drawWheel();
+  </script>
+</body>
+</html>
