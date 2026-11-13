@@ -8,19 +8,20 @@
   <script src="/socket.io/socket.io.js"></script>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen p-6">
-  <div class="max-w-4xl mx-auto space-y-6">
-    <!-- Header -->
+  <div class="max-w-5xl mx-auto space-y-6">
+    
+    <!-- Header y Estado -->
     <div class="flex justify-between items-center bg-slate-900 p-6 rounded-2xl border border-slate-800">
       <div>
         <h1 class="text-2xl font-bold text-pink-500">Ruleta Interactiva TikTok SaaS</h1>
-        <p class="text-sm text-slate-400">Panel de Control de Streamer</p>
+        <p class="text-sm text-slate-400">Panel de Configuración de Niveles</p>
       </div>
       <div id="status-badge" class="px-4 py-2 rounded-full text-sm font-semibold bg-red-950 text-red-400 border border-red-800">
         🔴 Desconectado de TikTok
       </div>
     </div>
 
-    <!-- Conexión de TikTok -->
+    <!-- Conexión y Link OBS -->
     <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4">
       <div>
         <label class="block text-sm font-medium text-slate-300 mb-2">Usuario de TikTok (sin @)</label>
@@ -38,11 +39,31 @@
       </div>
     </div>
 
-    <!-- Simulador de Regalos (Para testear sin estar en vivo) -->
+    <!-- Editor de los 3 Niveles -->
+    <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 space-y-6">
+      <div class="flex justify-between items-center border-b border-slate-800 pb-4">
+        <h2 class="text-xl font-bold">Configuración de Niveles y Premios</h2>
+        <button id="btn-save" class="bg-emerald-600 hover:bg-emerald-500 font-semibold px-6 py-2.5 rounded-xl transition shadow-lg shadow-emerald-900/20">Guardar Cambios</button>
+      </div>
+
+      <!-- Pestañas de Niveles -->
+      <div class="flex gap-2 border-b border-slate-800 pb-2">
+        <button onclick="switchTab(1)" id="tab-1" class="px-4 py-2 rounded-lg font-semibold bg-pink-600 text-white transition">Nivel 1 (Fácil)</button>
+        <button onclick="switchTab(2)" id="tab-2" class="px-4 py-2 rounded-lg font-semibold bg-slate-800 text-slate-400 hover:text-white transition">Nivel 2 (Medio)</button>
+        <button onclick="switchTab(3)" id="tab-3" class="px-4 py-2 rounded-lg font-semibold bg-slate-800 text-slate-400 hover:text-white transition">Nivel 3 (Difícil)</button>
+      </div>
+
+      <!-- Contenedor de Sectores del Nivel Activo -->
+      <div id="sectors-container" class="space-y-3">
+        <!-- Se inyecta dinámicamente con JS -->
+      </div>
+    </div>
+
+    <!-- Simulador de Pruebas -->
     <div class="bg-slate-900 p-6 rounded-2xl border border-slate-800 flex justify-between items-center">
       <div>
-        <h3 class="font-bold text-lg">Simulador de Prueba</h3>
-        <p class="text-xs text-slate-400">Dispará un regalo simulado para verificar que la ruleta gire en el OBS.</p>
+        <h3 class="font-bold text-lg">Simulador de Prueba (Test OBS)</h3>
+        <p class="text-xs text-slate-400">Dispará un regalo simulado para verificar que la ruleta gire en pantalla.</p>
       </div>
       <div class="flex gap-2">
         <button onclick="testGift('Rosa', 1)" class="bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-sm">Rosa (N1)</button>
@@ -53,29 +74,88 @@
   </div>
 
   <script>
-    // Generar un token único por navegador/cliente si no existe
     let token = localStorage.getItem('streamer_token');
     if (!token) {
       token = 'st_' + Math.random().toString(36).substring(2, 15);
       localStorage.setItem('streamer_token', token);
     }
 
-    // Mostrar link de OBS
-    const obsUrl = `${window.location.origin}/overlay/${token}`;
-    document.getElementById('obs-link').value = obsUrl;
+    document.getElementById('obs-link').value = `${window.location.origin}/overlay/${token}`;
 
-    // Conexión Socket.io
     const socket = io({
       query: { token, role: 'dashboard' }
     });
 
-    const statusBadge = document.getElementById('status-badge');
+    // Estructura por defecto de los 3 niveles
+    let currentConfig = {
+      1: [
+        { label: "Premio A", color: "#FF3366", weight: 1 },
+        { label: "Premio B", color: "#33CCFF", weight: 1 },
+        { label: "Premio C", color: "#FFCC00", weight: 1 },
+        { label: "Premio D", color: "#33FF66", weight: 1 }
+      ],
+      2: [
+        { label: "Reto 1", color: "#9933FF", weight: 1 },
+        { label: "Reto 2", color: "#FF6633", weight: 1 },
+        { label: "Castigo", color: "#333333", weight: 2 },
+        { label: "Premio Doble", color: "#00FFCC", weight: 1 }
+      ],
+      3: [
+        { label: "VIP Épico", color: "#FFD700", weight: 1 },
+        { label: "Giro Legendario", color: "#FF0055", weight: 1 },
+        { label: "Premio Supremo", color: "#00FFFF", weight: 1 }
+      ]
+    };
+
+    let activeLevel = 1;
+
+    function switchTab(level) {
+      activeLevel = level;
+      for (let i = 1; i <= 3; i++) {
+        const btn = document.getElementById(`tab-${i}`);
+        if (i === level) {
+          btn.className = "px-4 py-2 rounded-lg font-semibold bg-pink-600 text-white transition";
+        } else {
+          btn.className = "px-4 py-2 rounded-lg font-semibold bg-slate-800 text-slate-400 hover:text-white transition";
+        }
+      }
+      renderSectors();
+    }
+
+    function renderSectors() {
+      const container = document.getElementById('sectors-container');
+      container.innerHTML = '';
+      
+      const sectors = currentConfig[activeLevel];
+      sectors.forEach((sector, index) => {
+        const row = document.createElement('div');
+        row.className = "flex gap-3 items-center bg-slate-950 p-3 rounded-xl border border-slate-800";
+        row.innerHTML = `
+          <input type="color" value="${sector.color}" onchange="updateSector(${index}, 'color', this.value)" class="w-10 h-10 bg-transparent rounded cursor-pointer">
+          <input type="text" value="${sector.label}" oninput="updateSector(${index}, 'label', this.value)" placeholder="Nombre del premio" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-pink-500">
+          <input type="number" value="${sector.weight}" oninput="updateSector(${index}, 'weight', Number(this.value))" placeholder="Peso" class="w-20 bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-sm focus:outline-none focus:border-pink-500" title="Peso de probabilidad">
+        `;
+        container.appendChild(row);
+      });
+    }
+
+    function updateSector(index, field, value) {
+      currentConfig[activeLevel][index][field] = value;
+    }
+
+    document.getElementById('btn-save').addEventListener('click', () => {
+      socket.emit('client:save_config', currentConfig);
+      alert('¡Configuración guardada y sincronizada con OBS!');
+    });
+
+    // Conexión TikTok
     const btnConnect = document.getElementById('btn-connect');
     const inputUser = document.getElementById('tiktok-user');
+    const statusBadge = document.getElementById('status-badge');
 
     btnConnect.addEventListener('click', () => {
       const username = inputUser.value.trim();
-      if (!username) return alert('Ingresá un usuario de TikTok');
+      if (!username) return alert('Ingresá tu usuario de TikTok');
       btnConnect.textContent = 'Conectando...';
       socket.emit('client:connect_tiktok', { username });
     });
@@ -87,14 +167,9 @@
         btnConnect.textContent = 'Desconectar';
       } else {
         statusBadge.className = 'px-4 py-2 rounded-full text-sm font-semibold bg-red-950 text-red-400 border border-red-800';
-        statusBadge.textContent = `🔴 Desconectado (${data.reason || ''})`;
+        statusBadge.textContent = `🔴 Desconectado`;
         btnConnect.textContent = 'Conectar';
       }
-    });
-
-    socket.on('tiktok:error', (err) => {
-      alert(err.message);
-      btnConnect.textContent = 'Conectar';
     });
 
     function testGift(giftName, coins) {
@@ -108,6 +183,9 @@
         repeatCount: 1
       });
     }
+
+    // Render inicial
+    renderSectors();
   </script>
 </body>
 </html>
